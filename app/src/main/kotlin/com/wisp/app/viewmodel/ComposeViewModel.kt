@@ -123,8 +123,22 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
     private val _privateReply = MutableStateFlow(false)
     val privateReply: StateFlow<Boolean> = _privateReply
 
+    // Locked = the user is replying to a private reply, so the new reply must also be private
+    // (sending publicly would attach an e-tag to the rumor id on public relays, leaking metadata).
+    private val _privateReplyLocked = MutableStateFlow(false)
+    val privateReplyLocked: StateFlow<Boolean> = _privateReplyLocked
+
     fun togglePrivateReply() {
+        if (_privateReplyLocked.value) return
         _privateReply.value = !_privateReply.value
+    }
+
+    /** Called by ComposeScreen when the screen mounts with [replyTo]; auto-enables
+     *  + locks the private toggle if [replyTo] is itself a private reply we received. */
+    fun configureForReply(replyTo: NostrEvent?) {
+        val isReplyingToPrivate = replyTo != null && eventRepo?.isPrivateReply(replyTo.id) == true
+        _privateReplyLocked.value = isReplyingToPrivate
+        if (isReplyingToPrivate) _privateReply.value = true
     }
 
     private val _powEnabled = MutableStateFlow(false)
@@ -1203,6 +1217,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         _hashtags.value = emptyList()
         _powEnabled.value = false
         _privateReply.value = false
+        _privateReplyLocked.value = false
         _galleryMode.value = false
         _galleryHasVideo.value = false
         _uploadedMediaMeta.clear()

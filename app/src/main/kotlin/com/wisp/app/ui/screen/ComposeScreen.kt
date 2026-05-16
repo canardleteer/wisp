@@ -182,6 +182,11 @@ fun ComposeScreen(
     val scheduleEnabled by viewModel.scheduleEnabled.collectAsState()
     val scheduleTimestamp by viewModel.scheduleTimestamp.collectAsState()
     val privateReply by viewModel.privateReply.collectAsState()
+    val privateReplyLocked by viewModel.privateReplyLocked.collectAsState()
+
+    LaunchedEffect(replyTo) {
+        viewModel.configureForReply(replyTo)
+    }
     val powStatus = powManager?.status?.collectAsState()?.value ?: PowStatus.Idle
     val isMiningBusy = powStatus is PowStatus.Mining
     val context = LocalContext.current

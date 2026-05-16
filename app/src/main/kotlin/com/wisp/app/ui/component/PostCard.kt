@@ -806,6 +806,7 @@ fun PostCard(
                 resolvedEmojis = resolvedEmojis,
                 unicodeEmojis = unicodeEmojis,
                 onOpenEmojiLibrary = onOpenEmojiLibrary,
+                isPrivate = isPrivate,
                 modifier = Modifier.weight(1f)
             )
             Icon(

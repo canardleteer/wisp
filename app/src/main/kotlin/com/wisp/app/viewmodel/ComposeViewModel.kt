@@ -16,7 +16,6 @@ import com.madebyevan.thumbhash.ThumbHash
 import com.wisp.app.nostr.ClientMessage
 import com.wisp.app.nostr.Keys
 import com.wisp.app.nostr.Nip10
-import com.wisp.app.nostr.Nip17
 import com.wisp.app.nostr.Nip30
 import com.wisp.app.nostr.Nip18
 import com.wisp.app.nostr.Nip19
@@ -32,9 +31,9 @@ import com.wisp.app.relay.OutboxRouter
 import com.wisp.app.relay.RelayPool
 import com.wisp.app.repo.BlossomRepository
 import com.wisp.app.repo.ContactRepository
-import com.wisp.app.repo.DmRelayLookup
 import com.wisp.app.repo.DmRepository
 import com.wisp.app.repo.KeyRepository
+import com.wisp.app.repo.PrivateReplyPublisher
 import com.wisp.app.repo.MentionCandidate
 import com.wisp.app.repo.MentionSearchRepository
 import com.wisp.app.repo.EventRepository
@@ -525,6 +524,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         signer: NostrSigner? = null,
         onNotePublished: (() -> Unit)? = null,
         powManager: PowManager? = null,
+        powPrefs: com.wisp.app.repo.PowPreferences? = null,
         resolvedEmojis: Map<String, String> = emptyMap()
     ) {
         val rawText = _content.value.text
@@ -568,7 +568,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         if (!useTimer || timerSeconds <= 0) {
             viewModelScope.launch {
                 try {
-                    val sentCount = publishNote(text, s, relayPool, replyTo, quoteTo, outboxRouter, powManager, resolvedEmojis)
+                    val sentCount = publishNote(text, s, relayPool, replyTo, quoteTo, outboxRouter, powManager, powPrefs, resolvedEmojis)
                     if (sentCount == 0) return@launch
                     onNotePublished?.invoke()
                     onSuccess()
@@ -579,7 +579,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
             }
             return
         }
-        startCountdown(text, s, relayPool, replyTo, quoteTo, outboxRouter, onSuccess, onNotePublished, powManager, resolvedEmojis, timerSeconds)
+        startCountdown(text, s, relayPool, replyTo, quoteTo, outboxRouter, onSuccess, onNotePublished, powManager, powPrefs, resolvedEmojis, timerSeconds)
     }
 
     private fun startCountdown(
@@ -592,6 +592,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         onSuccess: () -> Unit,
         onNotePublished: (() -> Unit)? = null,
         powManager: PowManager? = null,
+        powPrefs: com.wisp.app.repo.PowPreferences? = null,
         resolvedEmojis: Map<String, String> = emptyMap(),
         seconds: Int = 10
     ) {
@@ -599,7 +600,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         pendingPublish = {
             viewModelScope.launch {
                 try {
-                    val sentCount = publishNote(content, signer, relayPool, replyTo, quoteTo, outboxRouter, powManager, resolvedEmojis)
+                    val sentCount = publishNote(content, signer, relayPool, replyTo, quoteTo, outboxRouter, powManager, powPrefs, resolvedEmojis)
                     if (sentCount == 0) return@launch
                     onNotePublished?.invoke()
                     onSuccess()
@@ -647,6 +648,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         quoteTo: NostrEvent? = null,
         outboxRouter: OutboxRouter? = null,
         powManager: PowManager? = null,
+        powPrefs: com.wisp.app.repo.PowPreferences? = null,
         resolvedEmojis: Map<String, String> = emptyMap()
     ): Int {
         val tags = mutableListOf<List<String>>()
@@ -674,7 +676,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
             for (hashtag in _hashtags.value) tags.add(listOf("t", hashtag))
             tags.addAll(Nip30.buildEmojiTagsForContent(content, resolvedEmojis))
             if (interfacePrefs.isClientTagEnabled()) tags.add(listOf("client", "Wisp"))
-            return publishPrivateReply(content, replyTo, tags, signer, relayPool)
+            return publishPrivateReply(content, replyTo, tags, signer, relayPool, powPrefs)
         }
 
         val finalContent = if (quoteTo != null) {
@@ -907,7 +909,8 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         replyTo: NostrEvent,
         replyTags: List<List<String>>,
         signer: NostrSigner,
-        relayPool: RelayPool
+        relayPool: RelayPool,
+        powPrefs: com.wisp.app.repo.PowPreferences? = null
     ): Int {
         val dmRepoLocal = dmRepo
         if (dmRepoLocal == null) {
@@ -915,80 +918,32 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
             _publishing.value = false
             return 0
         }
-        val userPubkey = signer.pubkeyHex
-        val rumorCreatedAt = System.currentTimeMillis() / 1000
 
-        val recipientWrap = try {
-            Nip17.createGiftWrapRemote(
+        val difficulty = if (_powEnabled.value && powPrefs != null) powPrefs.getNoteDifficulty() else 0
+
+        val result = try {
+            PrivateReplyPublisher.send(
                 signer = signer,
-                recipientPubkeyHex = replyTo.pubkey,
-                message = content,
-                replyTags = replyTags,
-                rumorKind = 1,
-                createdAt = rumorCreatedAt
+                relayPool = relayPool,
+                dmRepo = dmRepoLocal,
+                relayListRepo = relayListRepo,
+                eventRepo = eventRepo,
+                replyTo = replyTo,
+                content = content,
+                baseTags = replyTags,
+                targetDifficulty = difficulty
             )
         } catch (e: Exception) {
             _error.value = getApplication<Application>().getString(R.string.error_publish_failed, e.message ?: "wrap failed")
             _publishing.value = false
             return 0
         }
-        val selfWrap = Nip17.createGiftWrapRemote(
-            signer = signer,
-            recipientPubkeyHex = userPubkey,
-            message = content,
-            replyTags = replyTags,
-            rumorKind = 1,
-            createdAt = rumorCreatedAt
-        )
 
-        // Recipient relay resolution: DM relays → read relays → write relays → own write relays (last resort).
-        val recipientRelays: List<String> = run {
-            val dmRelays = DmRelayLookup.fetch(replyTo.pubkey, relayPool, dmRepoLocal)
-            if (dmRelays.isNotEmpty()) return@run dmRelays
-            relayListRepo?.getReadRelays(replyTo.pubkey)?.takeIf { it.isNotEmpty() }?.let { return@run it }
-            relayListRepo?.getWriteRelays(replyTo.pubkey)?.takeIf { it.isNotEmpty() }?.let { return@run it }
-            emptyList()
-        }
-
-        val recipientMsg = ClientMessage.event(recipientWrap)
-        var sentCount = 0
-        if (recipientRelays.isNotEmpty()) {
-            for (url in recipientRelays) {
-                if (relayPool.sendToRelayOrEphemeral(url, recipientMsg, skipBadCheck = true)) sentCount++
-            }
-        } else {
-            sentCount += relayPool.sendToWriteRelays(recipientMsg)
-        }
-
-        if (sentCount == 0) {
+        if (result.sentCount == 0) {
             _error.value = getApplication<Application>().getString(R.string.error_no_relays_connected)
             _publishing.value = false
             return 0
         }
-
-        val selfMsg = ClientMessage.event(selfWrap)
-        if (relayPool.hasDmRelays()) relayPool.sendToDmRelays(selfMsg)
-        else relayPool.sendToWriteRelays(selfMsg)
-
-        // Optimistic local insert so the sender sees their own reply in-thread immediately.
-        val rumorId = NostrEvent.computeId(userPubkey, rumorCreatedAt, 1, replyTags, content)
-        val synthetic = NostrEvent(
-            id = rumorId,
-            pubkey = userPubkey,
-            created_at = rumorCreatedAt,
-            kind = 1,
-            tags = replyTags,
-            content = content,
-            sig = ""
-        )
-        eventRepo?.markPrivateReply(rumorId)
-        eventRepo?.cacheEvent(synthetic)
-        eventRepo?.addReplyCount(replyTo.id, rumorId)
-        Nip10.getRootId(replyTo)?.takeIf { it != replyTo.id }?.let { rootId ->
-            eventRepo?.addReplyCount(rootId, rumorId)
-        }
-        // Dedup our own self-wrap when it arrives back via the dms subscription.
-        dmRepoLocal.markGiftWrapSeen(selfWrap.id, rumorId)
 
         deleteDraftOnPublish(relayPool, signer)
         _content.value = TextFieldValue()
@@ -1001,7 +956,7 @@ class ComposeViewModel(app: Application, private val savedStateHandle: SavedStat
         _publishing.value = false
         _privateReply.value = false
 
-        return sentCount
+        return result.sentCount
     }
 
     private fun saveMentionsToState() {

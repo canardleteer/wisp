@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Schedule
@@ -107,7 +108,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -765,7 +765,7 @@ fun ComposeScreen(
                         if (replyTo != null && quoteTo == null && !galleryMode && !pollEnabled && !scheduleEnabled) {
                             IconButton(onClick = { viewModel.togglePrivateReply() }) {
                                 Icon(
-                                    painter = painterResource(R.drawable.ic_private_zap),
+                                    imageVector = Icons.Outlined.Lock,
                                     contentDescription = "Private reply",
                                     tint = if (privateReply) androidx.compose.ui.graphics.Color(0xFFFF8C00)
                                            else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1188,6 +1188,7 @@ fun ComposeScreen(
                                 signer = signer,
                                 onNotePublished = onNotePublished,
                                 powManager = powManager,
+                                powPrefs = powPrefs,
                                 resolvedEmojis = resolvedEmojis
                             )
                         },

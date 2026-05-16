@@ -3191,6 +3191,24 @@ fun WispNavHost(
                             com.wisp.app.nostr.Nip30.buildEmojiTagsForContent(content, notifResolvedEmojis) +
                             if (notifInterfacePrefs.isClientTagEnabled()) listOf(listOf("client", "Wisp")) else emptyList()
 
+                        // If the parent is a private reply we received, keep the thread encrypted
+                        // by gift-wrapping this reply too. Otherwise fall through to the public path.
+                        if (feedViewModel.eventRepo.isPrivateReply(replyToEvent.id)) {
+                            val difficulty = if (feedViewModel.powPrefs.isNotePowEnabled()) feedViewModel.powPrefs.getNoteDifficulty() else 0
+                            com.wisp.app.repo.PrivateReplyPublisher.send(
+                                signer = signer,
+                                relayPool = feedViewModel.relayPool,
+                                dmRepo = feedViewModel.dmRepo,
+                                relayListRepo = feedViewModel.relayListRepo,
+                                eventRepo = feedViewModel.eventRepo,
+                                replyTo = replyToEvent,
+                                content = content,
+                                baseTags = tags,
+                                targetDifficulty = difficulty
+                            )
+                            return@launch
+                        }
+
                         if (feedViewModel.powPrefs.isNotePowEnabled()) {
                             feedViewModel.powManager.submitNote(
                                 signer = signer,
